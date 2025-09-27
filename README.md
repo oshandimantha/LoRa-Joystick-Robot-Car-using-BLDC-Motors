@@ -20,7 +20,7 @@ The system uses a joystick for wireless control, supporting smooth forward, reve
 - 2 × Arduino Nano
 - 2 × LoRa SX1278 modules
 - Joystick module
-- Power supply (24V battery)
+- Power supply (36V battery)
 
 ---
 
