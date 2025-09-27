@@ -1,0 +1,170 @@
+/******************************************************
+ * Robot Car Motor Receiver (Arduino Nano + LoRa + 2x ZS-X11H)
+ * With Smooth Acceleration/Deceleration + Steering
+ ******************************************************/
+
+#include <SPI.h>
+#include <LoRa.h>
+
+// ================= USER SETTINGS =====================
+// LoRa pins
+#define LORA_SS   10
+#define LORA_RST  9
+#define LORA_DIO0 2
+
+// Deadzone (ignore joystick noise)
+#define DEADZONE 120
+
+// Motor invert logic (true = invert direction)
+#define INVERT_LEFT   false
+#define INVERT_RIGHT  true
+
+// Left Motor Pins
+#define PWM_LEFT    3
+#define DIR_LEFT    8
+#define BRAKE_LEFT  2
+
+// Right Motor Pins
+#define PWM_RIGHT   6
+#define DIR_RIGHT   7
+#define BRAKE_RIGHT 5
+
+// Smoothness control
+#define RAMP_STEP   2
+#define LOOP_DELAY  20
+
+// Max speed limits
+#define MAX_PWM_FORWARD  100
+#define MAX_PWM_REVERSE  100
+#define MAX_PWM_TURN     40
+// =====================================================
+
+// Store current PWM values
+int currentPWM_Left  = 0;
+int currentPWM_Right = 0;
+
+// Target PWM values
+int targetPWM_Left   = 0;
+int targetPWM_Right  = 0;
+
+// Target motor directions
+bool dir_Left  = HIGH;
+bool dir_Right = HIGH;
+
+void setup() {
+  Serial.begin(9600);
+  while (!Serial);
+
+  pinMode(PWM_LEFT, OUTPUT);
+  pinMode(DIR_LEFT, OUTPUT);
+  pinMode(BRAKE_LEFT, OUTPUT);
+
+  pinMode(PWM_RIGHT, OUTPUT);
+  pinMode(DIR_RIGHT, OUTPUT);
+  pinMode(BRAKE_RIGHT, OUTPUT);
+
+  digitalWrite(BRAKE_LEFT, LOW);
+  digitalWrite(BRAKE_RIGHT, LOW);
+
+  LoRa.setPins(LORA_SS, LORA_RST, LORA_DIO0);
+  if (!LoRa.begin(433E6)) {
+    Serial.println("Starting LoRa failed!");
+    while (1);
+  }
+
+  Serial.println("Motor Receiver Ready!");
+}
+
+void loop() {
+  int packetSize = LoRa.parsePacket();
+  if (packetSize) {
+    String data = "";
+    while (LoRa.available()) {
+      data += (char)LoRa.read();
+    }
+
+    // Data format: "Y,X"
+    int commaIndex = data.indexOf(',');
+    int joyY = data.substring(0, commaIndex).toInt();  // A3 (forward/reverse)
+    int joyX = data.substring(commaIndex + 1).toInt(); // A2 (steering)
+
+    int pwmVal = 0;
+
+    // ================= FORWARD =================
+    if (joyY > (550 + DEADZONE)) {
+      pwmVal = map(joyY, 550 + DEADZONE, 1023, 0, MAX_PWM_FORWARD);
+
+      targetPWM_Left  = pwmVal;
+      targetPWM_Right = pwmVal;
+      dir_Left  = HIGH;
+      dir_Right = HIGH;
+
+      Serial.print("[FORWARD] PWM: "); Serial.println(pwmVal);
+    }
+    // ================= REVERSE =================
+    else if (joyY < (550 - DEADZONE)) {
+      pwmVal = map(joyY, 550 - DEADZONE, 0, 0, MAX_PWM_REVERSE);
+
+      targetPWM_Left  = pwmVal;
+      targetPWM_Right = pwmVal;
+      dir_Left  = LOW;
+      dir_Right = LOW;
+
+      Serial.print("[REVERSE] PWM: "); Serial.println(pwmVal);
+    }
+    // ================= TURN RIGHT =================
+    else if (joyX > (510 + DEADZONE)) {
+      pwmVal = map(joyX, 510 + DEADZONE, 1023, 0, MAX_PWM_TURN);
+
+      targetPWM_Left  = pwmVal; // Forward
+      targetPWM_Right = pwmVal; // Reverse
+      dir_Left  = HIGH;
+      dir_Right = LOW;
+
+      Serial.print("[TURN RIGHT] PWM: "); Serial.println(pwmVal);
+    }
+    // ================= TURN LEFT =================
+    else if (joyX < (510 - DEADZONE)) {
+      pwmVal = map(joyX, 510 - DEADZONE, 0, 0, MAX_PWM_TURN);
+
+      targetPWM_Left  = pwmVal; // Reverse
+      targetPWM_Right = pwmVal; // Forward
+      dir_Left  = LOW;
+      dir_Right = HIGH;
+
+      Serial.print("[TURN LEFT] PWM: "); Serial.println(pwmVal);
+    }
+    // ================= STOP =================
+    else {
+      targetPWM_Left  = 0;
+      targetPWM_Right = 0;
+      Serial.println("[STOP]");
+    }
+  }
+
+  // ================= SMOOTH RAMPING =================
+  if (currentPWM_Left < targetPWM_Left) currentPWM_Left += RAMP_STEP;
+  else if (currentPWM_Left > targetPWM_Left) currentPWM_Left -= RAMP_STEP;
+
+  if (currentPWM_Right < targetPWM_Right) currentPWM_Right += RAMP_STEP;
+  else if (currentPWM_Right > targetPWM_Right) currentPWM_Right -= RAMP_STEP;
+
+  // ================= APPLY TO MOTORS =================
+  bool leftDir = dir_Left;
+  if (INVERT_LEFT) leftDir = !leftDir;
+  digitalWrite(DIR_LEFT, leftDir);
+  analogWrite(PWM_LEFT, currentPWM_Left);
+
+  bool rightDir = dir_Right;
+  if (INVERT_RIGHT) rightDir = !rightDir;
+  digitalWrite(DIR_RIGHT, rightDir);
+  analogWrite(PWM_RIGHT, currentPWM_Right);
+
+  // Debug each motor separately
+  Serial.print("Left Motor -> PWM: "); Serial.print(currentPWM_Left);
+  Serial.print(" | Dir: "); Serial.print(digitalRead(DIR_LEFT));
+  Serial.print(" || Right Motor -> PWM: "); Serial.print(currentPWM_Right);
+  Serial.print(" | Dir: "); Serial.println(digitalRead(DIR_RIGHT));
+
+  delay(LOOP_DELAY);
+}
