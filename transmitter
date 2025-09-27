@@ -1,0 +1,54 @@
+/******************************************************
+ * Robot Car Joystick Transmitter (Arduino Nano + LoRa)
+ ******************************************************/
+
+#include <SPI.h>
+#include <LoRa.h>
+
+// ================= USER SETTINGS =====================
+// LoRa pins
+#define LORA_SS   10
+#define LORA_RST  9
+#define LORA_DIO0 2
+
+// Joystick pins
+#define JOY_Y A3
+#define JOY_X A2
+
+// Deadzone (ignore joystick noise)
+#define DEADZONE 120
+// =====================================================
+
+void setup() {
+  Serial.begin(9600);
+  while (!Serial);
+
+  LoRa.setPins(LORA_SS, LORA_RST, LORA_DIO0);
+  if (!LoRa.begin(433E6)) {
+    Serial.println("Starting LoRa failed!");
+    while (1);
+  }
+
+  Serial.println("Joystick Transmitter Ready!");
+}
+
+void loop() {
+  int joyY = analogRead(JOY_Y);
+  int joyX = analogRead(JOY_X);
+
+  // Apply deadzone
+  if (abs(joyY - 512) < DEADZONE) joyY = 512;
+  if (abs(joyX - 512) < DEADZONE) joyX = 512;
+
+  // Send data as "Y,X"
+  String data = String(joyY) + "," + String(joyX);
+  LoRa.beginPacket();
+  LoRa.print(data);
+  LoRa.endPacket();
+
+  // Debug print
+  Serial.print("Joystick Y: "); Serial.print(joyY);
+  Serial.print(" | X: "); Serial.println(joyX);
+
+  delay(100);
+}
